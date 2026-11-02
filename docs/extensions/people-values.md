@@ -192,7 +192,7 @@ if (typeof host.browserLauncher === "function") {
 }
 ```
 
-Each such session gets a Chromium of its own, which stops with its page. A provider that fails opens no page: it never falls back to this machine. Uploads of this machine's files are refused, and the panel lists none of this machine's servers for such a session. See [`browserLauncher`](reference/host.md#browserlauncher).
+Each such session gets a Chromium of its own, which stops with its page. A provider that fails opens no page: it never falls back to this machine. Uploads of this machine's files are refused, and the panel lists none of this machine's servers for such a session. See [`browserLauncher`](reference/host.md#browserlauncher), and [examples/browser-over-ssh.ts](../examples/browser-over-ssh.ts).
 
 ## Together: a sign-in
 

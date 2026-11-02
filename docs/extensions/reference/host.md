@@ -299,7 +299,7 @@ Runs sessions' browsers elsewhere, such as in a session's VM. When a session's p
 - **Local servers.** The Browser panel lists no servers of this machine for such a session: their addresses are not the same there. To know this before a page opens, Pi Pocket asks the provider too, so keep the provider quick.
 - **One at a time.** The last provider registered wins. The returned function removes it, when it is still the one in use. Pass the function to `web.onDispose`. Check that the member is there first ([Using the host](../host.md#check-for-new-members)).
 
-See [the limits](limits.md#asking-people-and-hidden-values).
+See [examples/browser-over-ssh.ts](../../examples/browser-over-ssh.ts) and [the limits](limits.md#asking-people-and-hidden-values).
 
 ## Notices and text
 

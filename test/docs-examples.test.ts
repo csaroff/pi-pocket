@@ -2,6 +2,7 @@
 import {
     cleanUp,
     lastText,
+    loadTools,
     modelTexts,
     newSession,
     openApp,
@@ -11,12 +12,21 @@ import {
     scriptedModel,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
+import {
+    chmodSync,
+    copyFileSync,
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { findBrowser } from "../src/server/browser/discovery.ts";
 
 const DOCS = fileURLToPath(new URL("../docs/", import.meta.url));
 const EXAMPLES = join(DOCS, "examples");
@@ -60,6 +70,10 @@ const route: FauxResponseStep = (context) => {
         return call("read_page", { url: "http://localhost:9999/admin" });
     }
 
+    if (text.includes("open the far page")) {
+        return call("browser", { action: "navigate", url: "data:text/html,<title>Far</title>" });
+    }
+
     if (text.includes("plain push")) {
         return call("bash", { command: "echo git push origin main" });
     }
@@ -100,6 +114,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
     assert.deepEqual(
         listed.map((module) => [module.file, module.enabled]),
         [
+            ["browser-over-ssh.ts", false],
             ["clock.ts", false],
             ["my-words.ts", false],
             ["no-force-push.ts", false],
@@ -109,6 +124,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
     );
 
     for (const file of [
+        "browser-over-ssh.ts",
         "clock.ts",
         "my-words.ts",
         "no-force-push.ts",
@@ -149,3 +165,43 @@ test("the example extensions load as drop-ins, off until the owner turns them on
 
     assert.ok(client !== undefined, "its browser module is there");
 });
+
+test(
+    "Browser over SSH runs a session's browser through ssh, and keeps it here without a machine",
+    { skip: findBrowser() === undefined ? "no Chromium-based browser on this machine" : false },
+    async () => {
+        // A fake `ssh` on the PATH: it runs the command here, as ssh runs it on the other machine.
+        const bin = mkdtempSync(join(root, "bin-"));
+        const calls = join(bin, "calls");
+
+        writeFileSync(
+            join(bin, "ssh"),
+            `#!/bin/sh\necho "$@" >> "${calls}"\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec sh -c "$*"\n`,
+        );
+        chmodSync(join(bin, "ssh"), 0o755);
+        const saved = { ...process.env };
+
+        process.env.PATH = `${bin}:${process.env.PATH}`;
+        process.env.POCKET_BROWSER_SSH_CHROMIUM = findBrowser()!;
+        process.env.POCKET_BROWSER_SSH_ARGS = process.env.PI_POCKET_BROWSER_ARGS ?? "";
+
+        try {
+            await app.setExtensionEnabled(owner(app), "browser-over-ssh.ts", true);
+            const here = await newSession(app);
+
+            // No machine named: the browser here.
+            assert.equal(await app.browsers.elsewhere(Number(here)), false);
+            process.env.POCKET_BROWSER_SSH = "me@box";
+            const id = await newSession(app);
+
+            assert.equal(await app.browsers.elsewhere(Number(id)), true);
+            await loadTools(app, id, "browser");
+            await say(app, id, "open the far page");
+            assert.match(await answer(id), /tool said: Opened data:text\/html/);
+            assert.match(readFileSync(calls, "utf8"), /^-o BatchMode=yes -T me@box -- exec /);
+            await app.browsers.close(Number(id));
+        } finally {
+            process.env = saved;
+        }
+    },
+);
