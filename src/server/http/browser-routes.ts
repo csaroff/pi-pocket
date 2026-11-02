@@ -102,8 +102,9 @@ export async function browserRoutes(
     }
 
     if (action === "servers" && method === "GET") {
-        // What runs on this machine, and its pages' titles, is the owner's to see.
-        if (user.role !== "owner") {
+        // What runs on this machine, and its pages' titles, is the owner's to see. A browser that runs elsewhere (in a
+        // session's VM) does not reach this machine's servers at those addresses: it gets none.
+        if (user.role !== "owner" || (await browsers.elsewhere(key))) {
             return json(response, 200, { servers: [] });
         }
 

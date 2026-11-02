@@ -221,6 +221,12 @@ export interface Host {
         options?: { open?: boolean },
     ): Promise<BrowserPageHandle | undefined>;
     /**
+     * Runs sessions' browsers elsewhere, such as in a session's VM. As a session's page opens, `provider` gives the command that starts its Chromium there, or undefined for the browser on this machine. One provider at a time: the last one wins. Returns how to stop: pass it to `web.onDispose`.
+     * @since 0.28.0
+     * @experimental
+     */
+    browserLauncher(provider: BrowserLauncherProvider): () => void;
+    /**
      * Reports something to the server log and to the app. With `conversationId` (since 0.13.1), only that session's
      * tabs show it.
      * @since 0.1.0
@@ -598,6 +604,47 @@ export interface CommandRun {
 export type CommandEnvProvider = (
     run: CommandRun,
 ) => Record<string, string> | undefined | Promise<Record<string, string> | undefined>;
+
+/**
+ * How to start one session's Chromium elsewhere, as a `host.browserLauncher` provider gives it.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface BrowserLauncher {
+    /**
+     * A program and its first arguments, such as `["ssh", "-o", "BatchMode=yes", "vm", "--"]`. It gets one more argument: a shell command that runs Chromium with the DevTools pipe on its standard input and output.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly command: readonly string[];
+    /**
+     * The browser to run there. Default: `chromium`.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly executable?: string;
+    /**
+     * Its profile folder there. Default: `/tmp/pi-pocket-browser-<session>`.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly profile?: string;
+    /**
+     * Extra Chromium flags there, such as `--no-sandbox`. This machine's own flags do not go there.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly args?: readonly string[];
+}
+
+/**
+ * Gives how to start a session's browser elsewhere, or undefined for the browser on this machine.
+ * @since 0.28.0
+ * @experimental
+ */
+export type BrowserLauncherProvider = (
+    conversationId: ConversationId,
+) => BrowserLauncher | undefined | Promise<BrowserLauncher | undefined>;
 
 /**
  * What an extension points at on a page: a ref from the snapshot, a CSS selector, a visible label, or a point.

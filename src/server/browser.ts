@@ -8,8 +8,12 @@
  * Each conversation's page lives in a browser context of its own: cookies and storage are not shared between
  * conversations. Pages are memory only: a restart closes them, and each conversation's last address and size come back
  * from its saved state when its page is next opened.
+ *
+ * An extension can run a conversation's browser elsewhere (`host.browserLauncher`, `browser/launchers.ts`), such as in
+ * that session's VM: that conversation then gets a Chromium of its own, started through the launcher's command, which
+ * closes with its page. What happens after the launch is the same for both.
  */
-import { BrowserError, Chromium } from "./browser/cdp.ts";
+import { BrowserError, Chromium, type Json, type Launcher } from "./browser/cdp.ts";
 import { findBrowser, profileFolder } from "./browser/discovery.ts";
 import { BrowserPage, type BrowserState, type Saved, wait } from "./browser/page.ts";
 import { type Viewport, VIEWPORTS, viewportFrom } from "./browser/viewport.ts";
@@ -38,7 +42,29 @@ export interface BrowsersOptions {
     log?(line: string): void;
     /** A page nobody used or watched for this long closes. */
     idleMs?: number;
+    /**
+     * How to start a conversation's browser elsewhere, or undefined for the one on this machine. A failure opens no
+     * page: it does not fall back to this machine.
+     */
+    launcher?(conversationId: number): Promise<Launcher | undefined>;
 }
+
+/** A conversation's own Chromium, from a launcher, and the page it serves once that is open. */
+interface Remote {
+    readonly launching: Promise<Chromium>;
+    page?: BrowserPage;
+}
+
+/**
+ * What a browser that runs elsewhere refuses: a file input takes paths, and this machine's paths mean nothing there (or
+ * something else). Downloads stay denied, as for every page.
+ */
+const REFUSED_ELSEWHERE: ReadonlyMap<string, string> = new Map([
+    [
+        "DOM.setFileInputFiles",
+        "This browser runs elsewhere: it cannot take files from this machine.",
+    ],
+]);
 
 /**
  * The browser and every conversation's page. The browser starts with the first page and stops a while after the last
@@ -53,6 +79,10 @@ export class Browsers {
     readonly #listeners = new Set<(conversationId: number, state: BrowserState) => void>();
     readonly #pending = new Map<number, NodeJS.Timeout>();
     readonly #problems = new Map<number, string>();
+    /** Conversations whose browser runs elsewhere, each with its own Chromium. */
+    readonly #remote = new Map<number, Remote>();
+    /** The pages that run in such a browser, also after it stopped. */
+    readonly #elsewhere = new WeakSet<BrowserPage>();
     readonly #reaper: NodeJS.Timeout;
     #idleSince = Date.now();
     #closing = false;
@@ -185,28 +215,8 @@ export class Browsers {
 
         this.#options.log?.(`Browser started: ${executable}`);
 
-        chromium.connection.onEvent = (method, params) => {
-            if (!method.startsWith("Target.")) {
-                return;
-            }
-
-            const info =
-                params.targetInfo ??
-                (method === "Target.targetDestroyed" ? { targetId: params.targetId } : undefined);
-
-            if (info === undefined) {
-                return;
-            }
-
-            for (const [id, page] of this.#pages) {
-                // A page closed by its own script (window.close()) is gone, with its browser context.
-                if (method === "Target.targetDestroyed" && info.targetId === page.targetId) {
-                    void this.#discard(id, page);
-                } else {
-                    page.targetEvent(method, info);
-                }
-            }
-        };
+        chromium.connection.onEvent = (method, params) =>
+            this.#targetEvent(method, params, (page) => !this.#elsewhere.has(page));
 
         chromium.connection.onClose = () => {
             if (this.#chromium === launching) {
@@ -214,11 +224,123 @@ export class Browsers {
             }
 
             for (const page of this.#pages.values()) {
-                page.close();
+                if (!this.#elsewhere.has(page)) {
+                    page.close();
+                }
             }
         };
 
         return chromium;
+    }
+
+    /** A browser's target events, for the pages that run in it. */
+    #targetEvent(method: string, params: Json, mine: (page: BrowserPage) => boolean): void {
+        if (!method.startsWith("Target.")) {
+            return;
+        }
+
+        const info =
+            params.targetInfo ??
+            (method === "Target.targetDestroyed" ? { targetId: params.targetId } : undefined);
+
+        if (info === undefined) {
+            return;
+        }
+
+        for (const [id, page] of this.#pages) {
+            if (!mine(page)) {
+                continue;
+            }
+
+            // A page closed by its own script (window.close()) is gone, with its browser context.
+            if (method === "Target.targetDestroyed" && info.targetId === page.targetId) {
+                void this.#discard(id, page);
+            } else {
+                page.targetEvent(method, info);
+            }
+        }
+    }
+
+    /** A conversation's own Chromium, through its launcher. Its page, its idle time, and every closeAll stop it. */
+    async #launch(
+        conversationId: number,
+        launcher: Launcher,
+    ): Promise<{ chromium: Chromium; remote: Remote }> {
+        if (this.#closing) {
+            throw new BrowserError("The server is stopping.");
+        }
+
+        // One left from a page that is gone: a conversation has one browser at a time.
+        const left = this.#remote.get(conversationId);
+
+        if (left !== undefined) {
+            this.#remote.delete(conversationId);
+            await this.#stopRemote(left);
+        }
+
+        const launching = Chromium.launch(launcher.executable, launcher.profile, [], launcher);
+        const remote: Remote = { launching };
+
+        this.#remote.set(conversationId, remote);
+        launching.catch(() => {
+            if (this.#remote.get(conversationId) === remote) {
+                this.#remote.delete(conversationId);
+            }
+        });
+        const chromium = await launching;
+
+        // Closed while it started (closeAll, or the server stopping): nothing else will stop this one.
+        if (this.#closing || this.#remote.get(conversationId) !== remote) {
+            chromium.kill();
+
+            throw new BrowserError("The browser was closed.");
+        }
+
+        this.#options.log?.(
+            `Browser started for conversation ${conversationId} through ${launcher.command[0]}`,
+        );
+        chromium.connection.refused = REFUSED_ELSEWHERE;
+        chromium.connection.onEvent = (method, params) =>
+            this.#targetEvent(method, params, (page) => page === remote.page);
+
+        chromium.connection.onClose = () => {
+            if (this.#remote.get(conversationId) === remote) {
+                this.#remote.delete(conversationId);
+            }
+
+            remote.page?.close();
+        };
+
+        return { chromium, remote };
+    }
+
+    async #stopRemote(remote: Remote): Promise<void> {
+        const chromium = await remote.launching.catch(() => undefined);
+
+        if (chromium === undefined) {
+            return;
+        }
+
+        chromium.kill();
+        await Promise.race([chromium.exited, wait(4000)]);
+    }
+
+    /**
+     * Whether the conversation's browser runs elsewhere: its open page's, or the one it would open. A launcher that
+     * fails counts as elsewhere, so nothing of this machine shows for it.
+     */
+    async elsewhere(conversationId: number): Promise<boolean> {
+        const page = this.page(conversationId);
+
+        if (page !== undefined) {
+            return this.#elsewhere.has(page);
+        }
+
+        if (this.#options.launcher === undefined) {
+            return false;
+        }
+
+        return (await this.#options.launcher(conversationId).catch(() => true)) !== undefined;
     }
 
     /**
@@ -272,7 +394,53 @@ export class Browsers {
             throw new BrowserError("The browser was closed.");
         }
 
-        const chromium = await this.#browser();
+        const launcher = await this.#options.launcher?.(conversationId);
+
+        if (stale()) {
+            throw new BrowserError("The browser was closed.");
+        }
+
+        if (launcher === undefined) {
+            return this.#createOn(conversationId, options, await this.#browser(), saved, stale);
+        }
+
+        const { chromium, remote } = await this.#launch(conversationId, launcher);
+
+        try {
+            const page = await this.#createOn(
+                conversationId,
+                options,
+                chromium,
+                saved,
+                stale,
+                remote,
+            );
+
+            if (chromium.connection.closed) {
+                throw new BrowserError("The browser stopped.");
+            }
+
+            return page;
+        } catch (error) {
+            if (this.#remote.get(conversationId) === remote) {
+                this.#remote.delete(conversationId);
+            }
+
+            await this.#stopRemote(remote);
+
+            throw error;
+        }
+    }
+
+    /** A new page for the conversation in `chromium`, in a browser context of its own. */
+    async #createOn(
+        conversationId: number,
+        options: OpenOptions,
+        chromium: Chromium,
+        saved: Saved | undefined,
+        stale: () => boolean,
+        remote?: Remote,
+    ): Promise<BrowserPage> {
         const connection = chromium.connection;
         const { browserContextId } = await connection.send("Target.createBrowserContext", {
             disposeOnDetach: false,
@@ -304,6 +472,12 @@ export class Browsers {
                 changed: () => this.#changed(conversationId),
                 saved: (value) => this.#options.save?.(conversationId, value),
             });
+
+            if (remote !== undefined) {
+                remote.page = page;
+                this.#elsewhere.add(page);
+            }
+
             await page.init();
 
             if (stale()) {
@@ -351,16 +525,34 @@ export class Browsers {
 
         page.close();
 
-        if (this.#pages.size === 0) {
+        if (this.#hostPages() === 0) {
             this.#idleSince = Date.now();
         }
 
         this.#changed(conversationId);
+
+        // A page elsewhere had a browser of its own: it stops with the page.
+        if (this.#elsewhere.has(page)) {
+            const remote = this.#remote.get(conversationId);
+
+            if (remote?.page === page) {
+                this.#remote.delete(conversationId);
+                await this.#stopRemote(remote);
+            }
+
+            return;
+        }
+
         const chromium = await this.#chromium?.catch(() => undefined);
 
         await chromium?.connection
             .send("Target.disposeBrowserContext", { browserContextId: page.contextId })
             .catch(() => {});
+    }
+
+    /** The pages open in the browser on this machine. */
+    #hostPages(): number {
+        return [...this.#pages.values()].filter((page) => !this.#elsewhere.has(page)).length;
     }
 
     #reap(): void {
@@ -374,7 +566,7 @@ export class Browsers {
 
         // The browser itself stops a few minutes after its last page closed.
         if (
-            this.#pages.size === 0 &&
+            this.#hostPages() === 0 &&
             this.#opening.size === 0 &&
             this.#chromium !== undefined &&
             Date.now() - this.#idleSince > 5 * 60_000
@@ -413,6 +605,9 @@ export class Browsers {
         }
 
         this.#pages.clear();
+        const remotes = [...this.#remote.values()];
+
+        this.#remote.clear();
 
         if (options.final === true) {
             // After the pages closed, which announces them: nobody listens any more.
@@ -423,7 +618,10 @@ export class Browsers {
             this.#pending.clear();
         }
 
-        await this.#stopBrowser();
+        await Promise.all([
+            this.#stopBrowser(),
+            ...remotes.map((remote) => this.#stopRemote(remote)),
+        ]);
 
         if (options.final !== true) {
             for (const id of ids) {

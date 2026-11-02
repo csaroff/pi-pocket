@@ -118,6 +118,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **What streams late:** command output holds back up to the longest hidden value's length less one character, until the command ends.
 - **Variables for one command:** 256 KB in all; a name is up to 128 characters. A provider has 5 seconds for one command; past that, it adds nothing.
 - **A snapshot's controls as data:** 500 at most; a select's options, 50.
+- **A browser launcher** (`host.browserLauncher`): a provider has 60 seconds for one session; past that, no page opens. `command` has 1 to 64 words and `args` up to 64, each up to 4096 characters.
 
 ## Public links
 

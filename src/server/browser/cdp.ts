@@ -20,6 +20,8 @@ export class Connection {
     >();
     readonly #sessions = new Map<string, EventListener>();
     #closed: string | undefined;
+    /** Methods this connection refuses, with why: a browser that runs elsewhere cannot take this machine's files. */
+    refused: ReadonlyMap<string, string> | undefined;
     /** Events without a session: the browser's own, such as targets appearing. */
     onEvent: EventListener | undefined;
     onClose: (() => void) | undefined;
@@ -109,6 +111,12 @@ export class Connection {
             return Promise.reject(new BrowserError(this.#closed));
         }
 
+        const refusal = this.refused?.get(method);
+
+        if (refusal !== undefined) {
+            return Promise.reject(new BrowserError(refusal));
+        }
+
         const id = ++this.#next;
 
         return new Promise((resolve, reject) => {
@@ -172,6 +180,43 @@ const LAUNCH_ARGS = [
     "--force-color-profile=srgb",
 ];
 
+/**
+ * How to start Chromium somewhere else, such as in a VM over SSH. `command` is a program and its first arguments (`ssh
+ * … --`, `sh -c`): it gets the Chromium command line as one more argument, a shell command that reads the protocol from
+ * its standard input and writes it to its standard output.
+ */
+export interface Launcher {
+    readonly command: readonly string[];
+    /** The browser to run there. */
+    readonly executable: string;
+    /** Its profile folder there. */
+    readonly profile: string;
+    /** Extra flags there, such as `--no-sandbox`. This machine's own flags do not go there. */
+    readonly args?: readonly string[];
+}
+
+/** One word for a POSIX shell: quoted, so nothing in it expands. */
+export function shellQuote(word: string): string {
+    return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * The shell command that runs Chromium with the pipe on standard input and output: Chromium reads fd 3 and writes fd 4,
+ * so fd 3 is the input, fd 4 the output, and Chromium's own output goes nowhere. `exec` keeps one process, so it stops
+ * with what started it.
+ */
+export function launchLine(executable: string, profile: string, extra: readonly string[]): string {
+    const words = [
+        executable,
+        ...LAUNCH_ARGS,
+        `--user-data-dir=${profile}`,
+        ...extra,
+        "about:blank",
+    ];
+
+    return `exec ${words.map(shellQuote).join(" ")} 3<&0 4>&1 1>/dev/null`;
+}
+
 /** One Chromium process. It exits on its own when the pipe closes, so a crashed server leaves none behind. */
 export class Chromium {
     readonly connection: Connection;
@@ -191,19 +236,42 @@ export class Chromium {
         });
     }
 
+    /**
+     * Start Chromium here, or with `launcher` somewhere else: then the protocol goes over the launcher's standard input
+     * and output, and `executable`, `profile`, and `extra` are ignored for the launcher's own.
+     */
     static async launch(
         executable: string,
         profile: string,
         extra: readonly string[],
+        launcher?: Launcher,
     ): Promise<Chromium> {
-        mkdirSync(profile, { recursive: true, mode: 0o700 });
-        const child = spawn(
-            executable,
-            [...LAUNCH_ARGS, `--user-data-dir=${profile}`, ...extra, "about:blank"],
-            {
-                stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
-            },
-        );
+        let child: ChildProcess;
+
+        if (launcher === undefined) {
+            mkdirSync(profile, { recursive: true, mode: 0o700 });
+            child = spawn(
+                executable,
+                [...LAUNCH_ARGS, `--user-data-dir=${profile}`, ...extra, "about:blank"],
+                {
+                    stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
+                },
+            );
+        } else {
+            const [program, ...first] = launcher.command;
+
+            if (program === undefined) {
+                throw new BrowserError("The browser's launcher has no command.");
+            }
+
+            executable = program;
+            child = spawn(
+                program,
+                [...first, launchLine(launcher.executable, launcher.profile, launcher.args ?? [])],
+                { stdio: ["pipe", "pipe", "pipe"] },
+            );
+        }
+
         let stderr = "";
 
         child.stderr?.setEncoding("utf8");
@@ -228,13 +296,17 @@ export class Chromium {
 
         failed.catch(() => {});
 
-        if (child.stdio[3] == null || child.stdio[4] == null) {
+        // Chromium's own pipe, or the launcher's standard input and output.
+        const out = launcher === undefined ? child.stdio[3] : child.stdin;
+        const input = launcher === undefined ? child.stdio[4] : child.stdout;
+
+        if (out == null || input == null) {
             child.kill("SIGKILL");
 
             throw new BrowserError(`Could not start ${executable}.`);
         }
 
-        const connection = new Connection(child.stdio[3] as Writable, child.stdio[4] as Readable);
+        const connection = new Connection(out as Writable, input as Readable);
         const chromium = new Chromium(child, connection);
 
         child.once("exit", () => connection.close("The browser stopped."));
@@ -251,7 +323,28 @@ export class Chromium {
             );
             await connection.send("Target.setDiscoverTargets", { discover: true });
         } catch (error) {
+            // The pipe can close just before the exit comes: the exit's words (and its error output) say why.
+            const closed = connection.closed;
+
             chromium.kill();
+
+            if (closed) {
+                const exit = await Promise.race([
+                    failed.then(
+                        () => undefined,
+                        (reason: unknown) => reason,
+                    ),
+                    new Promise<undefined>((done) => {
+                        const timer = setTimeout(() => done(undefined), 1000);
+
+                        timer.unref();
+                    }),
+                ]);
+
+                if (exit instanceof Error) {
+                    throw exit;
+                }
+            }
 
             throw error;
         }

@@ -171,6 +171,29 @@ const noTypedPasswords = hook(ToolTask, {
 
 Return it in your extension's `hooks`. It is a guard against mistakes: Pi can still press keys one at a time, or set a value with `evaluate`.
 
+## Run the browser elsewhere
+
+Since 0.28.0, and experimental: `host.browserLauncher(provider)` runs a session's browser on another machine or in a VM, such as the session's sandbox. The page then reads that machine's files and `localhost`, and its traffic follows that machine's network rules. The panel, Pi's tool, and `host.browser` work as before.
+
+```typescript
+if (typeof host.browserLauncher === "function") {
+    web.onDispose(
+        host.browserLauncher(async (conversationId) => {
+            const vm = await vmOf(conversationId); // your own lookup
+
+            return vm === undefined
+                ? undefined // this session uses the browser on this machine
+                : {
+                      command: ["ssh", "-o", "BatchMode=yes", vm.address, "--"],
+                      args: ["--no-sandbox"],
+                  };
+        }),
+    );
+}
+```
+
+Each such session gets a Chromium of its own, which stops with its page. A provider that fails opens no page: it never falls back to this machine. Uploads of this machine's files are refused, and the panel lists none of this machine's servers for such a session. See [`browserLauncher`](reference/host.md#browserlauncher).
+
 ## Together: a sign-in
 
 A tool `sign_in` that Pi calls when it meets a sign-in page:

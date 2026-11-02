@@ -118,6 +118,7 @@ import { Schedules } from "./schedules.ts";
 import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
+import { BrowserLaunchers } from "./browser/launchers.ts";
 import { AppEventBus } from "./app-events.ts";
 import { changeSettings, shownSettings } from "./extension-settings.ts";
 import { ask, browserFor, checkValues } from "./extension-points.ts";
@@ -378,6 +379,8 @@ export class PocketApp {
     );
     /** What extensions add to the environment of each command (`hidden.ts`, `host.commandEnv`). */
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
+    /** Where sessions' browsers run, when an extension runs them elsewhere (`host.browserLauncher`). */
+    readonly browserLaunchers = new BrowserLaunchers((line) => this.#log(line));
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
     /** Updates of Pi Pocket itself: the newest release, and updating to it (`updates.ts`). */
@@ -506,6 +509,7 @@ export class PocketApp {
             dataDir: options.dataDir,
             ...(options.browser === undefined ? {} : { executable: options.browser }),
             log: (line) => this.#log(line),
+            launcher: (id) => this.browserLaunchers.for(id),
             load: async (id) =>
                 (await this.harness.snapshot(
                     BrowserDoc,
@@ -821,6 +825,7 @@ export class PocketApp {
             ask: (request, askContext) => ask(this.approvals, request, askContext),
             hide: (value) => this.hidden.add(value),
             commandEnv: (provider) => this.commandEnvs.add(provider),
+            browserLauncher: (provider) => this.browserLaunchers.add(provider),
             browser: (conversationId, options) =>
                 browserFor(
                     this.browsers,

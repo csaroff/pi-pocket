@@ -51,6 +51,7 @@ These members are public:
 - `fetchPublic(url, init)` (experimental, since 0.20.0)
 - `ask(request, context)`, `hide(value)`, `commandEnv(provider)`, `browser(conversationId, options)` (experimental, since 0.22.0: [People's values and the browser](../people-values.md))
 - `on(event, listener)` and the events of `AppEvents` (experimental, since 0.22.0: [Events, services, and settings](../services-settings.md))
+- `browserLauncher(provider)` (experimental, since 0.28.0: [People's values and the browser](../people-values.md#run-the-browser-elsewhere))
 
 These members are on `host` for Pi Pocket's own built-in extensions: `guard`, `approvals`, `schedules`, `goals`, `browsers`, `memory`, `watches`, `repoWatches`, `gallery`, `updates`, `pip`, and `pipCompaction`. They are **internal**. A drop-in can read them, but their shapes can change in any release. One of them becomes public only through a request for an extension point ([core-or-extension.md](core-or-extension.md#ask-for-a-new-extension-point)).
 
@@ -163,6 +164,8 @@ Since 0.22.0, these are experimental too: `web.publicPage` and `web.links`; `hos
 Since 0.26.0, `pocket.pip` (`ask`) is experimental, with `PipApi` and `PipAskResult`.
 
 Since 0.27.0, `host.roleOf(personId)` is experimental, and so is the `scroll` field of `host.browser`'s `snapshot()`.
+
+Since 0.28.0, `host.browserLauncher` is experimental, with `BrowserLauncher` and `BrowserLauncherProvider`.
 
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.
 

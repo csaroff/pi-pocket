@@ -281,6 +281,26 @@ Since 0.22.0 · Experimental
 
 A session's browser page: the one that Pi's `browser` tool and the people in the session use. With `open: true`, it opens the page when it is not open. It is `undefined` while the Browser module is off, and without `open`, when no page is open. See [`BrowserPageHandle`](#browserpagehandle).
 
+### `browserLauncher`
+
+```ts
+browserLauncher(provider: BrowserLauncherProvider): () => void;
+```
+
+Since 0.28.0 · Experimental
+
+Runs sessions' browsers elsewhere, such as in a session's VM. When a session's page opens, Pi Pocket calls `provider` with the session. A [`BrowserLauncher`](#browserlauncher) starts a Chromium for that session alone, through the launcher's command. `undefined` keeps the session on the browser on this machine, which all sessions share.
+
+- **The pipe.** The command gets one more argument: a POSIX shell command that runs Chromium with `--remote-debugging-pipe`, and ends in `3<&0 4>&1 1>/dev/null`. Chromium then reads the DevTools protocol from the command's standard input and writes it to its standard output. `ssh … --` and `sh -c` both work. Chromium's standard error comes back on the command's standard error: when the browser does not start, the error shows its last lines.
+- **The same page.** After the launch, all is as for the browser here: a browser context for the session, the panel's frames, taps and keys, and Pi's `browser` tool.
+- **It stops with the page.** The session's Chromium stops when its page closes: by its idle time, when the Browser module goes off, when the server restarts or stops, or when the page closes itself. The next open asks the provider again. A page that is open stays where it is until it closes.
+- **No fall back.** A provider that throws, takes more than 60 seconds, or gives a launcher that is not valid, opens no page: the panel and Pi's tool show the error. A session that must not use this machine's browser never gets it by mistake.
+- **Files.** The page reads files and `localhost` where it runs: a file path that Pi or the owner opens is a path there. File uploads of this machine's files (`DOM.setFileInputFiles`) are refused. Downloads stay denied, as for every page.
+- **Local servers.** The Browser panel lists no servers of this machine for such a session: their addresses are not the same there. To know this before a page opens, Pi Pocket asks the provider too, so keep the provider quick.
+- **One at a time.** The last provider registered wins. The returned function removes it, when it is still the one in use. Pass the function to `web.onDispose`. Check that the member is there first ([Using the host](../host.md#check-for-new-members)).
+
+See [the limits](limits.md#asking-people-and-hidden-values).
+
 ## Notices and text
 
 ### `notice`
@@ -621,6 +641,40 @@ type CommandEnvProvider = (
 Since 0.22.0 · Experimental
 
 Gives the variables to add to one command. A name is letters, digits, and `_`, not starting with a digit; a value has no NUL. A variable that breaks these is left out. The variables of all providers for one command are 256 KB at most.
+
+### `BrowserLauncher`
+
+```ts
+interface BrowserLauncher {
+    readonly command: readonly string[];
+    readonly executable?: string;
+    readonly profile?: string;
+    readonly args?: readonly string[];
+}
+```
+
+Since 0.28.0 · Experimental
+
+How to start one session's Chromium elsewhere:
+
+- `command`: a program and its first arguments, such as `["ssh", "-o", "BatchMode=yes", "vm", "--"]`. It is run with no shell on this machine.
+- `executable`: the browser to run there. Default: `chromium`.
+- `profile`: its profile folder there. Default: `/tmp/pi-pocket-browser-<session>`.
+- `args`: extra Chromium flags there, such as `--no-sandbox`. This machine's flags (`PI_POCKET_BROWSER_ARGS`) do not go there.
+
+Each word in the Chromium command line is quoted for the shell there.
+
+### `BrowserLauncherProvider`
+
+```ts
+type BrowserLauncherProvider = (
+    conversationId: ConversationId,
+) => BrowserLauncher | undefined | Promise<BrowserLauncher | undefined>;
+```
+
+Since 0.28.0 · Experimental
+
+Gives how to start a session's browser elsewhere, or `undefined` for the browser on this machine.
 
 ### `BrowserTarget`
 

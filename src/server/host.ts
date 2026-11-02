@@ -26,6 +26,7 @@ import type { Watches } from "./watches.ts";
 import type { FetchPublic } from "./public-fetch.ts";
 import type { BrowserControl } from "./browser/page.ts";
 import type { CommandEnvProvider, HiddenValue } from "./hidden.ts";
+import type { BrowserLauncherProvider } from "./browser/launchers.ts";
 import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
 
@@ -35,6 +36,7 @@ export type { AppEventName, AppEvents } from "./app-events.ts";
 
 export type { BrowserControl } from "./browser/page.ts";
 export type { CommandEnvProvider, CommandRun, HiddenValue } from "./hidden.ts";
+export type { BrowserLauncher, BrowserLauncherProvider } from "./browser/launchers.ts";
 
 /** A session linked to another, as `host.linkedSessions.list` gives it to the session that asks. */
 export interface LinkedSession {
@@ -443,6 +445,14 @@ export interface PocketHost {
         conversationId: ConversationId,
         options?: { open?: boolean },
     ): Promise<BrowserPageHandle | undefined>;
+    /**
+     * Run sessions' browsers elsewhere, such as in a session's VM: for each session whose page opens, `provider` gives
+     * the command that starts its Chromium there, or undefined for the browser on this machine. One provider at a time:
+     * the last one wins. Returns how to stop; pass that to `web.onDispose`.
+     *
+     * @experimental In 0.28: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     */
+    browserLauncher(provider: BrowserLauncherProvider): () => void;
     /** Report something odd to the log and the connected clients: with `conversationId`, to that session's tabs only. */
     notice(
         level: "info" | "warning" | "error",

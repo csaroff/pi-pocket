@@ -128,6 +128,7 @@ A module split into parts keeps its name for the part others import, with the re
 | File                                     | Owns                                                                                                                                       |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `browser.ts`                             | `Browsers`: one headless Chromium for every conversation, started with the first page and stopped after the last; each conversation's page |
+| `browser/launchers.ts`                   | `host.browserLauncher`: a conversation's own Chromium elsewhere (a VM), started through a command; its answers checked                     |
 | `browser/page.ts`                        | `BrowserPage`: one conversation's page: its events, screencast frames, console, navigation, and what Pi and people do to it                |
 | `browser/cdp.ts`                         | The DevTools protocol over a pipe (`--remote-debugging-pipe`), and the Chromium process; `BrowserError`                                    |
 | `browser/discovery.ts`                   | Finding a Chromium-based browser on this machine, and where its profile goes                                                               |

@@ -22,6 +22,8 @@ import type {
     BrowserPageHandle as RealBrowserPageHandle,
     BrowserControl as RealBrowserControl,
     BrowserTarget as RealBrowserTarget,
+    BrowserLauncher as RealBrowserLauncher,
+    BrowserLauncherProvider as RealBrowserLauncherProvider,
     PublicLinkInfo as RealPublicLinkInfo,
     PublicLinkRequest as RealPublicLinkRequest,
     PublicLinks as RealPublicLinks,
@@ -48,6 +50,8 @@ import type {
     BrowserPageHandle,
     BrowserControl,
     BrowserTarget,
+    BrowserLauncher,
+    BrowserLauncherProvider,
     PublicLinkInfo,
     PublicLinkRequest,
     PublicLinks,
@@ -133,6 +137,14 @@ export const browserControl = (real: RealBrowserControl): BrowserControl => real
 export const browserControlBack = (types: BrowserControl): RealBrowserControl => types;
 export const browserTarget = (real: RealBrowserTarget): BrowserTarget => real;
 export const browserTargetBack = (types: BrowserTarget): RealBrowserTarget => types;
+export const browserLauncher = (real: RealBrowserLauncher): BrowserLauncher => real;
+export const browserLauncherBack = (types: BrowserLauncher): RealBrowserLauncher => types;
+export const browserLauncherProvider = (
+    real: RealBrowserLauncherProvider,
+): BrowserLauncherProvider => real;
+export const browserLauncherProviderBack = (
+    types: BrowserLauncherProvider,
+): RealBrowserLauncherProvider => types;
 export const appEvents = (real: RealAppEvents): AppEvents => real;
 export const appEventsBack = (types: AppEvents): RealAppEvents => types;
 export const settingField = (real: RealSettingField): SettingField => real;
