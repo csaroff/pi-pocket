@@ -13326,6 +13326,20 @@ textarea.notes {
     color: var(--accent);
 }
 
+/* A binary file: what it is, and its download. */
+.file-binary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+}
+
+.file-binary .button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .file-image {
     max-width: 100%;
     border: 1px solid var(--hair);

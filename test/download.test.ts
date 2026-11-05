@@ -86,3 +86,14 @@ test("a download needs a sign-in, a file, and, for a viewer, a file in the sessi
     assert.equal((await download("exports/deck-v2.pptx", viewer)).status, 200);
     assert.equal((await download(outside, viewer)).status, 404);
 });
+
+test("a download keeps the file viewer's rules for someone invited to one session", async () => {
+    const other = await newSession(app);
+    const guest = app.config.addUser("Guest", "guest", [String(id)]).token;
+    const stranger = app.config.addUser("Stranger", "guest", [String(other)]).token;
+
+    assert.equal((await download("exports/deck-v2.pptx", guest)).status, 200);
+    // Outside the session's folder, and in a session they are not invited to, there is nothing.
+    assert.equal((await download(join(work, "..", "outside-download.txt"), guest)).status, 404);
+    assert.equal((await download("exports/deck-v2.pptx", stranger)).status, 404);
+});
