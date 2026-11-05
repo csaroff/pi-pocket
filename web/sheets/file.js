@@ -10,6 +10,7 @@ import { actions, canSteer, closeSheet, insertIntoComposer, notify, store } from
 import {
     APPLE,
     copyText,
+    downloadFile,
     fileUrl,
     formatBytes,
     html,
@@ -29,6 +30,18 @@ const COLOR_BYTES = 256 * 1024;
 
 const isMarkdown = (path) => /\.(md|markdown|mdx)$/i.test(path);
 const isPage = (path) => /\.(html?|xhtml)$/i.test(path);
+/**
+ * The kinds of file with a download button in the viewer's bar. A binary file has its own, bigger one where its text
+ * would be; a folder or a pipe does not download.
+ */
+const DOWNLOADABLE = new Set(["text", "image"]);
+
+/**
+ * The newest request (`nextFileRequest`) whose binary file has started to download. The viewer shows such a file only
+ * as a download, so opening one downloads it, as a link to a `.zip` does; a viewer drawn again for the same request (a
+ * branch change, the tile moving) does not download it twice.
+ */
+let downloaded = 0;
 
 /** A file's lines, colored for its language when it is not too big to. */
 function useLines(file, path) {
@@ -84,6 +97,15 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
                 if (live) {
                     setFile(each);
                     onLoad?.(each);
+
+                    if (
+                        each.kind === "binary" &&
+                        typeof refresh === "number" &&
+                        refresh > downloaded
+                    ) {
+                        downloaded = refresh;
+                        downloadFile(each.path);
+                    }
                 }
             },
             (failure) => {
@@ -137,7 +159,12 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
         }
         ${
             file?.kind === "binary" &&
-            html`<p class="muted">A binary file: nothing to show as text.</p>`
+            html`<div class="file-binary">
+                <p class="muted">A binary file: nothing to show as text. Opening it downloads it.</p>
+                <button class="button small" onClick=${() => downloadFile(file.path)}>
+                    <${Icon} name="download" size=${16} /> Download
+                </button>
+            </div>`
         }
         ${
             file?.kind === "other" &&
@@ -243,7 +270,7 @@ function FileLines({ lines, colored, all, line }) {
 
 /**
  * The viewer's buttons: Preview or Source for Markdown and pages, Run for a previewed page (`running` is null where it
- * does not apply), Copy, and @ Mention.
+ * does not apply), Copy, Download (for text and images), and @ Mention.
  */
 function FileActions({ file, shown, previewable, preview, onPreview, running, onRun }) {
     return html`${
@@ -273,6 +300,17 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
             onClick=${() => copyText(file.text).then(() => notify("info", "Copied."))}
         >
             <${Icon} name="copy" size=${16} />
+        </button>`
+    }
+    ${
+        DOWNLOADABLE.has(file?.kind) &&
+        html`<button
+            class="icon-button"
+            title="Download"
+            aria-label="Download"
+            onClick=${() => downloadFile(file.path)}
+        >
+            <${Icon} name="download" size=${16} />
         </button>`
     }
     ${

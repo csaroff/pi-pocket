@@ -19,6 +19,22 @@ const currentConversation = () => store.state.view.conversation?.id;
 export const fileUrl = (path, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/file?path=${encodeURIComponent(path)}`;
 
+/** A file of the session as a download: the server sends it as an attachment, whatever is in it. */
+export const downloadUrl = (path, conversationId = currentConversation()) =>
+    `/api/c/${conversationId}/download?path=${encodeURIComponent(path)}`;
+
+/** Download a file of the session, as a link to a `.zip` does: the browser saves it, and the app stays where it is. */
+export function downloadFile(path, conversationId = currentConversation()) {
+    const link = document.createElement("a");
+
+    link.href = downloadUrl(path, conversationId);
+    link.download = path.replace(/\/$/, "").split("/").pop() || "download";
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+}
+
 /** The `index`th image stored in a message: a pasted image or one a tool returned. */
 export const entryImageUrl = (entryId, index, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/image/${entryId}/${index}`;
@@ -649,6 +665,12 @@ function fromBase(path) {
 let fileRequests = 0;
 
 /**
+ * A new number for each time someone asks for a file, in the sheet and in the Files tile alike: it only grows while
+ * the page is open, so the viewer starts a binary file's download once for each request (`FileView`).
+ */
+export const nextFileRequest = () => ++fileRequests;
+
+/**
  * Open a file (or folder) of the session in the viewer: in the Files tile while it is open, otherwise in a sheet.
  * `path:42` opens it at line 42.
  */
@@ -668,7 +690,7 @@ export function openFile(path) {
     }
 
     // `n` differs for each request, so asking again for the open file reads it again (`FileView`'s `refresh`).
-    openSheet({ type: "file", id: target.path, line: target.line, n: ++fileRequests });
+    openSheet({ type: "file", id: target.path, line: target.line, n: nextFileRequest() });
 }
 
 /**
@@ -1065,6 +1087,7 @@ const ICONS = {
     logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
     globe: "M12 21a9 9 0 100-18 9 9 0 000 18zM3.5 9h17M3.5 15h17M12 3a14 14 0 010 18M12 3a14 14 0 000 18",
     reload: "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",
+    download: "M12 4v11M7 10l5 5 5-5M5 20h14",
     copy: "M9 9h10a1 1 0 011 1v10a1 1 0 01-1 1H9a1 1 0 01-1-1V10a1 1 0 011-1zM5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1",
     undo: "M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-4",
     phone: "M8 3h8a1 1 0 011 1v16a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1zM11 18h2",
